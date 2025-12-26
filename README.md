@@ -1,0 +1,2 @@
+THE DISASTER PREDICTION APP IS BEING RUN ON STREAMLIT AND PREDICTING THE DISASTER BASED ON THE LONGITUDE NAD THE LATITUDE OF A PARTICULAR PLACE.
+<img width="1724" height="762" alt="image" src="https://github.com/user-attachments/assets/74ed1ce8-effa-494e-84c0-2ab976fe4b6d" />
