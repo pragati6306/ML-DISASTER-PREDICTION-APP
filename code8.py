@@ -15,6 +15,8 @@ from imblearn.over_sampling import SMOTE
 import joblib
 import pickle
 import warnings
+import re
+from pathlib import Path
 import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
@@ -23,6 +25,9 @@ from plotly.subplots import make_subplots
 import xgboost as xgb
 
 from code7 import XGBOOST_AVAILABLE
+from src.location_risk import predict_disaster_risk
+
+BASE_DIR = Path(__file__).resolve().parent
 
 st.set_page_config(page_title="Natural Disaster Prediction", page_icon="🌍", layout="wide")
 st.markdown("""
@@ -89,6 +94,16 @@ class DisasterPredictor:
         
         # Store individual datasets for visualization
         self.individual_datasets = {}
+
+    @staticmethod
+    def parse_coordinate(value):
+        if pd.isna(value):
+            return np.nan
+        match = re.fullmatch(r"([+-]?\d+(?:\.\d+)?)([NSEW]?)", str(value).strip().upper())
+        if not match:
+            return np.nan
+        coordinate = float(match.group(1))
+        return -abs(coordinate) if match.group(2) in {"S", "W"} else coordinate
         
     def validate_and_clean_data(self, df):
         """Validate and clean the dataset"""
@@ -154,9 +169,9 @@ class DisasterPredictor:
     def load_and_preprocess_data(self):
         try:
             # Load datasets
-            earthquake_df = pd.read_csv('earthquakeUSCS.csv')
-            flood_df = pd.read_csv('flood_risk_dataset_india.csv')
-            cyclone_df = pd.read_csv('pacific.csv')
+            earthquake_df = pd.read_csv(BASE_DIR / 'earthquakeUSCS.csv')
+            flood_df = pd.read_csv(BASE_DIR / 'flood_risk_dataset_india.csv')
+            cyclone_df = pd.read_csv(BASE_DIR / 'pacific.csv')
             
             # Process earthquake data
             earthquake_processed = earthquake_df[['latitude', 'longitude', 'mag']].copy()
@@ -175,7 +190,11 @@ class DisasterPredictor:
             flood_processed['disaster_type'] = 'flood'
             flood_processed['latitude'] = pd.to_numeric(flood_processed['latitude'], errors='coerce')
             flood_processed['longitude'] = pd.to_numeric(flood_processed['longitude'], errors='coerce')
-            flood_processed['mag'] = np.random.uniform(1, 5, len(flood_processed))  # Synthetic magnitude
+            flood_target = pd.to_numeric(
+                flood_df.get('Flood Occurred', pd.Series(0, index=flood_df.index)),
+                errors='coerce'
+            ).fillna(0)
+            flood_processed['mag'] = np.where(flood_target.to_numpy() > 0, 5.0, 1.0)
             flood_processed = flood_processed.dropna()
             
             # Store for visualization
@@ -185,8 +204,8 @@ class DisasterPredictor:
             cyclone_processed = cyclone_df[['Latitude', 'Longitude', 'Maximum Wind']].copy()
             cyclone_processed.columns = ['latitude', 'longitude', 'mag']
             cyclone_processed['disaster_type'] = 'cyclone'
-            cyclone_processed['latitude'] = pd.to_numeric(cyclone_processed['latitude'], errors='coerce')
-            cyclone_processed['longitude'] = pd.to_numeric(cyclone_processed['longitude'], errors='coerce')
+            cyclone_processed['latitude'] = cyclone_processed['latitude'].map(self.parse_coordinate)
+            cyclone_processed['longitude'] = cyclone_processed['longitude'].map(self.parse_coordinate)
             cyclone_processed['mag'] = pd.to_numeric(cyclone_processed['mag'], errors='coerce')
             cyclone_processed = cyclone_processed.dropna()
             
@@ -1097,6 +1116,65 @@ def main():
         if reg_fig:
             st.plotly_chart(reg_fig, use_container_width=True)
     
+    if st.session_state.data_loaded:
+        st.header("🌍 Location-Based Disaster Risk Assessment")
+        st.caption("Scores use historical events within the selected radius. They are not official warnings.")
+        location_col1, location_col2, location_col3 = st.columns(3)
+        with location_col1:
+            assessment_latitude = st.number_input("Assessment latitude", min_value=-90.0, max_value=90.0, value=28.6139, step=0.0001, format="%.4f")
+        with location_col2:
+            assessment_longitude = st.number_input("Assessment longitude", min_value=-180.0, max_value=180.0, value=77.2090, step=0.0001, format="%.4f")
+        with location_col3:
+            assessment_radius = st.selectbox("Historical search radius", [25, 50, 100, 250], index=2, format_func=lambda value: f"{value} km")
+
+        if st.button("📍 Analyze Location", type="primary"):
+            probability_by_class = None
+            if st.session_state.models_trained and st.session_state.predictor.best_classification_model is not None:
+                scaled_location = st.session_state.predictor.scaler.transform([[assessment_latitude, assessment_longitude]])
+                probabilities = st.session_state.predictor.best_classification_model.predict_proba(scaled_location)[0]
+                probability_by_class = dict(zip(st.session_state.predictor.label_encoder.classes_, probabilities))
+            st.session_state.location_assessment = predict_disaster_risk(
+                assessment_latitude, assessment_longitude,
+                st.session_state.predictor.individual_datasets,
+                radius_km=assessment_radius,
+                model_probabilities=probability_by_class,
+            )
+
+        assessment = st.session_state.get("location_assessment")
+        if assessment:
+            score_col, level_col, events_col = st.columns(3)
+            with score_col:
+                st.metric("Overall risk score", f"{assessment['overall_score']:.1f}/100")
+            with level_col:
+                st.metric("Overall risk level", assessment["overall_level"])
+            with events_col:
+                st.metric("Historical events", assessment["historical_event_count"])
+            risk_rows = [{
+                "Disaster": name.title(),
+                "Risk score": details["risk_score"],
+                "Severity": details["severity"],
+                "Nearby events": details["event_count"],
+                "Nearest event (km)": details["nearest_event_km"],
+                "Evidence": details["evidence_source"],
+            } for name, details in assessment["risks"].items()]
+            risk_table = pd.DataFrame(risk_rows)
+            st.plotly_chart(px.bar(risk_table, x="Disaster", y="Risk score", color="Severity", range_y=[0, 100], title="Risk by disaster type"), use_container_width=True)
+            st.dataframe(risk_table, hide_index=True, use_container_width=True)
+            event_frames = []
+            for name, details in assessment["risks"].items():
+                events = details["events"].head(500).copy()
+                if not events.empty:
+                    events["disaster_type"] = name
+                    event_frames.append(events)
+            if event_frames:
+                nearby_events = pd.concat(event_frames, ignore_index=True)
+                map_fig = px.scatter_mapbox(nearby_events, lat="latitude", lon="longitude", color="disaster_type", size="mag", hover_data=["distance_km", "mag"], mapbox_style="open-street-map", zoom=4, title="Nearby historical events")
+                map_fig.add_trace(go.Scattermapbox(lat=[assessment["latitude"]], lon=[assessment["longitude"]], mode="markers", marker={"size": 16, "color": "black"}, name="Selected location"))
+                st.plotly_chart(map_fig, use_container_width=True)
+                st.dataframe(nearby_events[["disaster_type", "distance_km", "latitude", "longitude", "mag"]].head(20).round(3), hide_index=True, use_container_width=True)
+            else:
+                st.info("No historical events were found within this radius.")
+
     # Prediction section
     if st.session_state.models_trained:
         st.header("🔮 Disaster Prediction")

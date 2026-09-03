@@ -18,14 +18,14 @@ A Streamlit-based disaster risk assessment application that combines real earthq
 
 ```text
 python -m pip install -r requirements.txt
-python -m streamlit run app.py
+python -m streamlit run code8.py
 ```
 
 Open `http://localhost:8501` in a browser. Load the data from the sidebar, then train the models. Quick Mode reduces the hyperparameter search for demonstrations.
 
 ## Data
 
-The application expects these files beside `app.py`:
+The application expects these files beside `code8.py`:
 
 - `earthquakeUSCS.csv`: USGS-style earthquake records, including latitude, longitude, and magnitude
 - `flood_risk_dataset_india.csv`: Indian flood-risk observations and the `Flood Occurred` target
@@ -42,7 +42,8 @@ Predicted probabilities are model outputs from the selected classifier. Risk lab
 ## Project Structure
 
 ```text
-app.py                         Streamlit UI, preprocessing, models, and charts
+code8.py                       Streamlit UI, preprocessing, models, and charts
+src/location_risk.py           Haversine-based location risk features
 code7.py                       Optional XGBoost availability check
 earthquakeUSCS.csv             Earthquake data
 flood_risk_dataset_india.csv   Flood-risk data
