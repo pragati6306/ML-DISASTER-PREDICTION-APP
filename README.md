@@ -6,9 +6,7 @@ The platform is designed to help users understand the potential disaster risks a
 
 ## 🚀 Live Demo
 
-👉 **[Open the Streamlit App](YOUR_STREAMLIT_APP_LINK_HERE)**
-
-> Replace `YOUR_STREAMLIT_APP_LINK_HERE` with your deployed Streamlit URL.
+👉 **[Open the LIVE DEMO](https://drive.google.com/file/d/1K417oEo4Nzf8Ad5dv3-8FD6z0X3aKXWp/view?usp=sharing)**
 
 ---
 
